@@ -1,4 +1,5 @@
 import os
+import shutil
 import base64
 import datetime
 import logging
@@ -9,12 +10,14 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from email import message_from_bytes
 from dateutil import parser
+import time
 
 # Gmail API scope
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
-# Path for attachments on the F: drive via WSL
-BASE_DIR = "/mnt/f/BOG JE PROGRAM/GMAIL API/Attachments"
+# Paths for attachments on OneDrive and temp directory in WSL
+BASE_DIR = "/mnt/c/Users/ismar/OneDrive/ISO doo/Script"
+TEMP_DIR = "/mnt/f/BOG JE PROGRAM/GMAIL API/Temp_Attachments"
 DB_PATH = 'attachments.db'
 
 # Configure logging
@@ -24,7 +27,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# Initialize SQLite database
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -40,6 +42,9 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+
+# Make sure temp directory exists
+os.makedirs(TEMP_DIR, exist_ok=True)
 
 # Authenticate and create Gmail API service with token caching
 def authenticate_gmail():
@@ -105,7 +110,7 @@ def download_attachments(service, messages):
         date_header = next(header for header in headers if header["name"] == "Date")
         email_date = parser.parse(date_header["value"])
 
-        # Set folder structure based on year and month
+        # Set folder structure based on year and month (with month number for ordering)
         folder_path = os.path.join(BASE_DIR, str(email_date.year), email_date.strftime('%m-%B'))
         os.makedirs(folder_path, exist_ok=True)
 
@@ -119,21 +124,34 @@ def download_attachments(service, messages):
                     logging.info(f"Skipped already downloaded attachment: {part['filename']}")
                     continue
 
-                # Download and save the attachment
+                # Download the attachment to the temporary directory
                 attachment = service.users().messages().attachments().get(
                     userId='me', messageId=message_id, id=attachment_id
                 ).execute()
                 data = base64.urlsafe_b64decode(attachment['data'].encode('UTF-8'))
                 
-                # Save file
-                file_path = os.path.join(folder_path, part['filename'])
-                with open(file_path, 'wb') as f:
+                # Save file in TEMP_DIR first
+                temp_file_path = os.path.join(TEMP_DIR, part['filename'])
+                with open(temp_file_path, 'wb') as f:
                     f.write(data)
                 
-                logging.info(f"Downloaded and saved attachment to {file_path}")
+                logging.info(f"Downloaded attachment to temp directory: {temp_file_path}")
                 
-                # Log attachment in the database
-                log_attachment_download(message_id, attachment_id, file_path)
+                # Move file to the final OneDrive location with retries
+                final_file_path = os.path.join(folder_path, part['filename'])
+                for attempt in range(3):  # Retry up to 3 times
+                    try:
+                        shutil.move(temp_file_path, final_file_path)
+                        logging.info(f"Moved attachment to OneDrive folder: {final_file_path}")
+                        
+                        # Log attachment in the database
+                        log_attachment_download(message_id, attachment_id, final_file_path)
+                        break  # Exit retry loop if successful
+                    except Exception as e:
+                        logging.warning(f"Attempt {attempt + 1} to move file failed: {e}")
+                        time.sleep(2)  # Wait a bit before retrying
+                else:
+                    logging.error(f"Failed to move attachment after 3 attempts: {temp_file_path}")
 
 # Main function to authenticate, initialize DB, search emails, and download attachments
 def main():
