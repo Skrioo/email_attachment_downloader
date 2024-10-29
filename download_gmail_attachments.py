@@ -106,7 +106,7 @@ def download_attachments(service, messages):
         email_date = parser.parse(date_header["value"])
 
         # Set folder structure based on year and month
-        folder_path = os.path.join(BASE_DIR, str(email_date.year), email_date.strftime('%B'))
+        folder_path = os.path.join(BASE_DIR, str(email_date.year), email_date.strftime('%m-%B'))
         os.makedirs(folder_path, exist_ok=True)
 
         for part in msg.get('payload', {}).get('parts', []):
