@@ -1,0 +1,10 @@
+# Ignore sensitive files
+credentials.json
+token.json
+attachments.db
+attachment_download.log
+
+# Ignore virtual environment, if any
+venv/
+__pycache__/
+
